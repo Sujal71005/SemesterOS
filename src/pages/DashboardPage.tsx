@@ -1,10 +1,14 @@
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Brain, Check, Clock3, Code2, MoreHorizontal, Plus, Target } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import PageHeading from '../components/common/PageHeading'
 import SectionCard from '../components/common/SectionCard'
 import SampleBadge from '../components/dashboard/SampleBadge'
 import StatCard from '../components/dashboard/StatCard'
 import type { Deadline, Goal, ScheduleItem, StudyDay } from '../types/dashboard'
+import { listSyllabusAnalytics } from '../services/academics'
+import { calculateSyllabusProgress } from '../utils/syllabusProgress'
+import ProgressBar from '../components/academics/ProgressBar'
 
 const goals: Goal[] = [
   { label: 'Review Operating Systems notes', done: true },
@@ -34,6 +38,14 @@ const stats = [
 ]
 
 export default function DashboardPage() {
+  const [syllabusSummary, setSyllabusSummary] = useState<{ total: number; completed: number; percentage: number } | null>(null)
+  const [syllabusError, setSyllabusError] = useState<string | null>(null)
+  useEffect(() => { void listSyllabusAnalytics().then((data) => {
+    const progress = calculateSyllabusProgress(data.modules, data.topics, data.subjects)
+    const total = progress.reduce((sum, item) => sum + item.total, 0)
+    const completed = progress.reduce((sum, item) => sum + item.completed, 0)
+    setSyllabusSummary({ total, completed, percentage: total ? Math.round(completed / total * 100) : 0 })
+  }).catch((cause) => setSyllabusError(cause instanceof Error ? cause.message : 'Could not load syllabus progress.')) }, [])
   return (
     <div className="mx-auto max-w-[1280px]">
       <PageHeading eyebrow="Friday, November 21, 2026" title="Good morning, Student" description="A clear view of your semester, one day at a time." />
@@ -50,6 +62,10 @@ export default function DashboardPage() {
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <StatCard key={stat.label} {...stat} />)}</div>
+
+      <SectionCard title="Syllabus progress" action={<a href="/academics" className="text-xs text-blue-300 hover:text-blue-200">Academics <ArrowRight size={13} className="inline"/></a>}>
+        {syllabusSummary ? <><ProgressBar percentage={syllabusSummary.percentage} label="Semester topics"/><p className="mt-2 text-xs text-slate-500">{syllabusSummary.completed} completed · {Math.max(0, syllabusSummary.total - syllabusSummary.completed)} pending of {syllabusSummary.total} topics</p></> : syllabusError ? <p role="alert" className="text-sm text-rose-300">{syllabusError}</p> : <p className="text-sm text-slate-500">Loading syllabus progress…</p>}
+      </SectionCard>
 
       <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <SectionCard title="Today's timetable" action={<><SampleBadge /><button className="icon-button ml-1" aria-label="More timetable options"><MoreHorizontal size={18} /></button></>}>

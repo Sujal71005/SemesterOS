@@ -315,4 +315,3 @@ create index syllabus_modules_position_idx
   on public.syllabus_modules(user_id,subject_id,section,position);
 create index syllabus_topics_position_idx
   on public.syllabus_topics(user_id,module_id,position);
-
