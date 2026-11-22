@@ -7,11 +7,12 @@ import { test } from 'node:test'
 import { pathToFileURL } from 'node:url'
 
 const outDir = mkdtempSync(join(tmpdir(), 'semesteros-assignments-'))
-execFileSync(process.execPath, [resolve('node_modules/typescript/bin/tsc'), '--target', 'ES2022', '--module', 'ES2022', '--moduleResolution', 'Bundler', '--skipLibCheck', '--outDir', outDir, 'src/utils/assignmentDates.ts', 'src/utils/assignmentDateInput.ts', 'src/utils/assignmentValidation.ts', 'src/utils/assignmentStatusUpdate.ts', 'src/types/assignments.ts', 'src/types/academics.ts'], { stdio: 'inherit' })
+execFileSync(process.execPath, [resolve('node_modules/typescript/bin/tsc'), '--target', 'ES2022', '--module', 'ES2022', '--moduleResolution', 'Bundler', '--skipLibCheck', '--outDir', outDir, 'src/utils/assignmentDates.ts', 'src/utils/assignmentDateInput.ts', 'src/utils/assignmentCalendar.ts', 'src/utils/assignmentValidation.ts', 'src/utils/assignmentStatusUpdate.ts', 'src/types/assignments.ts', 'src/types/academics.ts'], { stdio: 'inherit' })
 const { isOverdue, isUpcoming, formatAssignmentStatus } = await import(pathToFileURL(resolve(outDir, 'utils/assignmentDates.js')))
 const service = await import(pathToFileURL(resolve(outDir, 'utils/assignmentValidation.js')))
 const dateInput = await import(pathToFileURL(resolve(outDir, 'utils/assignmentDateInput.js')))
 const statusUpdates = await import(pathToFileURL(resolve(outDir, 'utils/assignmentStatusUpdate.js')))
+const calendar = await import(pathToFileURL(resolve(outDir, 'utils/assignmentCalendar.js')))
 const now = new Date('2026-11-22T12:00:00.000Z')
 const assignment = (status, due_at) => ({ status, due_at })
 
@@ -87,6 +88,30 @@ test('status update does not submit the already saved status', async () => {
   const result = await statusUpdates.persistAssignmentStatus('todo', 'todo', async () => { calls += 1 }, () => {})
   assert.equal(result, true)
   assert.equal(calls, 0)
+})
+test('calendar creates a seven-column six-week date grid and navigable months', () => {
+  const cells = calendar.calendarCells(2026, 1)
+  assert.equal(cells.length, 42)
+  assert.equal(cells.filter((cell) => cell.inMonth).length, 28)
+  assert.equal(cells[0].date.getDay(), 0)
+})
+test('time selection combines with a local date and preserves existing local values', () => {
+  const localValue = calendar.combineLocalDateTime('2026-11-22', 14, 35)
+  assert.equal(localValue, '2026-11-22T14:35')
+  assert.deepEqual(calendar.splitLocalDateTime(localValue), { date: '2026-11-22', hour: 14, minute: 35 })
+})
+test('invalid calendar date or time values are rejected', () => {
+  assert.throws(() => calendar.combineLocalDateTime('invalid', 12, 0), /valid deadline/i)
+  assert.throws(() => calendar.combineLocalDateTime('2026-11-22', 24, 0), /valid deadline/i)
+})
+test('popover placement prefers sufficient space below and flips above near viewport bottom', () => {
+  assert.deepEqual(calendar.calculatePopoverPlacement({ top: 120, bottom: 160 }, 300, 800), { side: 'below', maxHeight: 300, top: 168 })
+  assert.deepEqual(calendar.calculatePopoverPlacement({ top: 650, bottom: 690 }, 300, 800), { side: 'above', maxHeight: 300, top: 642 })
+})
+test('short viewports constrain popover height to available space', () => {
+  const placement = calendar.calculatePopoverPlacement({ top: 300, bottom: 340 }, 500, 400)
+  assert.equal(placement.side, 'above')
+  assert.ok(placement.maxHeight < 500)
 })
 
 process.on('exit', () => rmSync(outDir, { recursive: true, force: true }))
