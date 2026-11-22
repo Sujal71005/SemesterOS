@@ -1,4 +1,4 @@
-import { CalendarDays, ChartNoAxesCombined, CheckSquare, Code2, FolderKanban, GraduationCap, LayoutDashboard, NotebookPen, Settings2, Wrench } from 'lucide-react'
+import { CalendarDays, ChartNoAxesCombined, CheckSquare, ClipboardList, Code2, FolderKanban, GraduationCap, LayoutDashboard, NotebookPen, Settings2, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export type NavigationItem = { label: string; path: string; icon: LucideIcon }
@@ -6,6 +6,7 @@ export type NavigationItem = { label: string; path: string; icon: LucideIcon }
 export const navigationItems: NavigationItem[] = [
   { label: 'Dashboard', path: '/', icon: LayoutDashboard },
   { label: 'Academics', path: '/academics', icon: GraduationCap },
+  { label: 'Assignments', path: '/assignments', icon: ClipboardList },
   { label: 'Timetable', path: '/timetable', icon: CalendarDays },
   { label: 'Daily Goals', path: '/daily-goals', icon: CheckSquare },
   { label: 'Placement', path: '/placement', icon: Code2 },
