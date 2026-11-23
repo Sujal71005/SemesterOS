@@ -1,11 +1,11 @@
 import { useCallback, useState } from 'react'
 import { X } from 'lucide-react'
-import type { AssignmentStatus, AssignmentWithSubject, CreateAssignmentInput, UpdateAssignmentInput } from '../../types/assignments'
+import type { AssignmentWithSubject, CreateAssignmentInput, UpdateAssignmentInput } from '../../types/assignments'
 import type { Subject } from '../../types/academics'
-import { formatAssignmentStatus } from '../../utils/assignmentDates'
 import { localDateTimeToIso, toLocalDateTimeInput } from '../../utils/assignmentDateInput'
 import { validateAssignmentTitle, validateAssignmentSubjectId } from '../../utils/assignmentValidation'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
+import AssignmentDateTimePicker from './AssignmentDateTimePicker'
 
 type Props = {
   subjects: Subject[]
@@ -16,14 +16,11 @@ type Props = {
   onSubmit: (input: CreateAssignmentInput | UpdateAssignmentInput) => Promise<void>
 }
 
-const statuses: AssignmentStatus[] = ['todo', 'in_progress', 'submitted', 'done']
-
 export default function AssignmentFormModal({ subjects, assignment, saving, error, onClose, onSubmit }: Props) {
   const [title, setTitle] = useState(assignment?.title ?? '')
   const [subjectId, setSubjectId] = useState(assignment?.subject_id ?? '')
   const [description, setDescription] = useState(assignment?.description ?? '')
   const [dueAt, setDueAt] = useState(toLocalDateTimeInput(assignment?.due_at ?? null))
-  const [status, setStatus] = useState<AssignmentStatus>(assignment?.status ?? 'todo')
   const [validationError, setValidationError] = useState<string | null>(null)
 
   const closeIfSafe = useCallback(() => { if (!saving) onClose() }, [onClose, saving])
@@ -38,7 +35,7 @@ export default function AssignmentFormModal({ subjects, assignment, saving, erro
       const cleanSubject = validateAssignmentSubjectId(subjectId)
       const due_at = localDateTimeToIso(dueAt)
       if (assignment) {
-        await onSubmit({ title: cleanTitle, subject_id: cleanSubject, description, due_at, status })
+        await onSubmit({ title: cleanTitle, subject_id: cleanSubject, description, due_at })
       } else {
         await onSubmit({ title: cleanTitle, subject_id: cleanSubject, description, due_at, status: 'todo' })
       }
@@ -54,8 +51,7 @@ export default function AssignmentFormModal({ subjects, assignment, saving, erro
         <label className="block text-sm text-slate-300" htmlFor="assignment-title">Assignment title<span className="ml-1 text-rose-300">*</span><input id="assignment-title" autoFocus required maxLength={180} value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none focus:border-blue-400/50" aria-describedby="assignment-title-help"/><span id="assignment-title-help" className="mt-1 block text-xs text-slate-500">{title.trim().length}/180 characters</span></label>
         <label className="block text-sm text-slate-300" htmlFor="assignment-subject">Subject or laboratory<span className="ml-1 text-rose-300">*</span><select id="assignment-subject" required value={subjectId} onChange={(event) => setSubjectId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none focus:border-blue-400/50"><option value="" disabled>Select a subject or lab</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name} · {subject.kind === 'lab' ? 'Laboratory' : 'Subject'}</option>)}</select>{subjects.length === 0 && <span className="mt-1 block text-xs text-amber-300">Add a subject or laboratory in Academics first.</span>}</label>
         <label className="block text-sm text-slate-300" htmlFor="assignment-description">Description <span className="text-xs text-slate-500">(optional)</span><textarea id="assignment-description" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} className="mt-1.5 w-full resize-y rounded-lg border border-white/10 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none focus:border-blue-400/50" /></label>
-        <label className="block text-sm text-slate-300" htmlFor="assignment-due">Due date and time <span className="text-xs text-slate-500">(optional)</span><input id="assignment-due" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none focus:border-blue-400/50"/><span className="mt-1 block text-xs text-slate-500">Leave empty if there is no deadline. Time is shown in your local timezone.</span></label>
-        {assignment && <label className="block text-sm text-slate-300" htmlFor="assignment-status">Status<select id="assignment-status" value={status} onChange={(event) => setStatus(event.target.value as AssignmentStatus)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none focus:border-blue-400/50">{statuses.map((item) => <option key={item} value={item}>{formatAssignmentStatus(item)}</option>)}</select></label>}
+        <AssignmentDateTimePicker value={dueAt} onChange={setDueAt} disabled={saving} />
         {(validationError || error) && <p role="alert" className="break-words text-sm text-rose-300">{validationError ?? error}</p>}
         <div className="flex justify-end gap-2 pt-2"><button type="button" disabled={saving} onClick={onClose} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.05] disabled:opacity-50">Cancel</button><button type="submit" disabled={saving || subjects.length === 0} className="inline-flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Saving…' : assignment ? 'Save Changes' : 'Create Assignment'}</button></div>
       </form>
