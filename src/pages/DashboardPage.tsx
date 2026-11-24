@@ -1,11 +1,11 @@
-import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Brain, Check, Clock3, Code2, MoreHorizontal, Plus, Target, ClipboardList, CalendarClock } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen, Brain, Check, Clock3, Code2, Target, ClipboardList, CalendarClock, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import PageHeading from '../components/common/PageHeading'
 import SectionCard from '../components/common/SectionCard'
 import SampleBadge from '../components/dashboard/SampleBadge'
 import StatCard from '../components/dashboard/StatCard'
-import type { Goal, ScheduleItem, StudyDay } from '../types/dashboard'
+import type { StudyDay } from '../types/dashboard'
 import { listSyllabusAnalytics } from '../services/academics'
 import { calculateSyllabusProgress } from '../utils/syllabusProgress'
 import ProgressBar from '../components/academics/ProgressBar'
@@ -13,28 +13,36 @@ import { listAssignments } from '../services/assignments'
 import type { AssignmentWithSubject } from '../types/assignments'
 import { formatAssignmentStatus, isOverdue, isUpcoming } from '../utils/assignmentDates'
 import { createLatestRequestGate } from '../utils/latestRequest'
+import { listSessionLogs, listStudySessions } from '../services/studyPlanner'
+import type { StudySessionLog, StudySessionWithSubject } from '../types/studyPlanner'
+import { calculateSessionOccurrences, formatLocalDate, parseLocalDate } from '../utils/studyPlannerDates'
+import { sessionCategoryStyles } from '../components/studyPlanner/StudyPlannerWeekView'
+import DailyGoalsDashboardSection from '../components/dashboard/DailyGoalsDashboardSection'
+import { listDailyGoalsByDate } from '../services/dailyGoals'
+import type { DailyGoal } from '../types/dailyGoals'
+import { calculateDailyGoalProgress } from '../utils/dailyGoalProgress'
+import { getTodayLocalDate } from '../utils/dailyGoalDates'
 
-const goals: Goal[] = [
-  { label: 'Review Operating Systems notes', done: true },
-  { label: 'Solve 2 array problems', done: false },
-  { label: 'Read project research paper', done: false },
-  { label: 'Revise database normalization', done: false },
-]
-const schedule: ScheduleItem[] = [
-  { time: '09:00 AM', title: 'Machine Learning and Swarm Intelligence', detail: 'Sample · Lecture', color: 'blue' },
-  { time: '11:00 AM', title: 'Data Analytics and Visualization', detail: 'Sample · Lecture', color: 'violet' },
-  { time: '02:00 PM', title: 'Mini Project-II', detail: 'Sample · Studio', color: 'green' },
-]
 const studyData: StudyDay[] = [
   { day: 'Mon', hours: 2.5 }, { day: 'Tue', hours: 3.8 }, { day: 'Wed', hours: 2.9 },
   { day: 'Thu', hours: 4.4 }, { day: 'Fri', hours: 3.2 }, { day: 'Sat', hours: 5.1 }, { day: 'Sun', hours: 2.1 },
 ]
 const stats = [
-  { label: 'Daily goals', value: '1 / 4', detail: '3 goals left today', icon: Target, tone: 'blue' as const },
   { label: 'Study hours', value: '24.0h', detail: 'This week · sample', icon: Clock3, tone: 'violet' as const },
   { label: 'DSA progress', value: '38 / 150', detail: 'Problems solved · sample', icon: Code2, tone: 'green' as const },
   { label: 'Semester progress', value: '62%', detail: 'Semester VI · sample', icon: BookOpen, tone: 'amber' as const },
 ]
+
+function clockMinutes(value: string): number { const [hour, minute] = value.split(':').map(Number); return hour * 60 + minute }
+function formatSessionTime(value: string): string { const [hour, minute] = value.split(':').map(Number); return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(2020, 0, 1, hour, minute)) }
+function formatSessionDate(value: string): string { return new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(parseLocalDate(value)) }
+function categoryDot(category: StudySessionWithSubject['session_category']): string {
+  if (category === 'lecture') return 'dot-blue'
+  if (category === 'practical') return 'dot-violet'
+  if (category === 'self_study') return 'dot-green'
+  if (category === 'revision') return 'bg-amber-300 text-amber-300'
+  return 'dot-blue'
+}
 
 export default function DashboardPage() {
   const [syllabusSummary, setSyllabusSummary] = useState<{ total: number; completed: number; percentage: number } | null>(null)
@@ -42,7 +50,18 @@ export default function DashboardPage() {
   const [assignments, setAssignments] = useState<AssignmentWithSubject[]>([])
   const [assignmentLoading, setAssignmentLoading] = useState(true)
   const [assignmentError, setAssignmentError] = useState<string | null>(null)
+  const [plannerSessions, setPlannerSessions] = useState<StudySessionWithSubject[]>([])
+  const [plannerLogs, setPlannerLogs] = useState<StudySessionLog[]>([])
+  const [plannerLoading, setPlannerLoading] = useState(true)
+  const [plannerError, setPlannerError] = useState<string | null>(null)
+  const [plannerRetry, setPlannerRetry] = useState(0)
+  const [dailyGoals, setDailyGoals] = useState<DailyGoal[]>([])
+  const [dailyGoalsLoading, setDailyGoalsLoading] = useState(true)
+  const [dailyGoalsError, setDailyGoalsError] = useState<string | null>(null)
+  const [dailyGoalsRetry, setDailyGoalsRetry] = useState(0)
   const [now, setNow] = useState(() => new Date())
+  const plannerRequest = useRef(createLatestRequestGate())
+  const dailyGoalsRequest = useRef(createLatestRequestGate())
   useEffect(() => {
     let active = true
     const requests = createLatestRequestGate()
@@ -68,7 +87,60 @@ export default function DashboardPage() {
     document.addEventListener('visibilitychange', refresh)
     return () => { active = false; requests.invalidate(); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
   }, [])
+  useEffect(() => {
+    let active = true
+    let inFlight = false
+    const load = async () => {
+      if (!active || inFlight) return
+      inFlight = true
+      const requestId = plannerRequest.current.begin()
+      setPlannerLoading(true); setPlannerError(null)
+      try {
+        const [sessions, logs] = await Promise.all([listStudySessions(), listSessionLogs()])
+        if (active && plannerRequest.current.isCurrent(requestId)) { setPlannerSessions(sessions); setPlannerLogs(logs) }
+      } catch (cause) {
+        if (active && plannerRequest.current.isCurrent(requestId)) setPlannerError(cause instanceof Error ? cause.message : 'Could not load Study Planner data.')
+      } finally {
+        inFlight = false
+        if (active && plannerRequest.current.isCurrent(requestId)) setPlannerLoading(false)
+      }
+    }
+    void load()
+    const refresh = () => { if (document.visibilityState === 'visible') void load() }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => { active = false; plannerRequest.current.invalidate(); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
+  }, [plannerRetry])
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 60_000); return () => window.clearInterval(timer) }, [])
+  const dailyGoalDate = getTodayLocalDate(now)
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const requestId = dailyGoalsRequest.current.begin()
+      setDailyGoalsLoading(true)
+      setDailyGoalsError(null)
+      try {
+        const goals = await listDailyGoalsByDate(dailyGoalDate)
+        if (active && dailyGoalsRequest.current.isCurrent(requestId)) setDailyGoals(goals)
+      } catch (cause) {
+        if (active && dailyGoalsRequest.current.isCurrent(requestId)) {
+          setDailyGoalsError(cause instanceof Error ? cause.message : "Could not load today's goals.")
+        }
+      } finally {
+        if (active && dailyGoalsRequest.current.isCurrent(requestId)) setDailyGoalsLoading(false)
+      }
+    }
+    const refresh = () => { if (document.visibilityState === 'visible') void load() }
+    void load()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      active = false
+      dailyGoalsRequest.current.invalidate()
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [dailyGoalDate, dailyGoalsRetry])
   const assignmentStats = useMemo(() => ({
     total: assignments.length,
     todo: assignments.filter((item) => item.status === 'todo').length,
@@ -81,6 +153,30 @@ export default function DashboardPage() {
     upcoming: assignments.filter((item) => isUpcoming(item, now)).sort((a, b) => Date.parse(a.due_at!) - Date.parse(b.due_at!)).slice(0, 4),
     overdue: assignments.filter((item) => isOverdue(item, now)).sort((a, b) => Date.parse(a.due_at!) - Date.parse(b.due_at!)).slice(0, 3),
   }), [assignments, now])
+  const todayKey = formatLocalDate(now)
+  const dailyGoalProgress = useMemo(() => calculateDailyGoalProgress(dailyGoals), [dailyGoals])
+  const dashboardStats = [
+    {
+      label: 'Daily goals',
+      value: dailyGoalsLoading || dailyGoalsError ? '—' : `${dailyGoalProgress.completed} / ${dailyGoalProgress.total}`,
+      detail: dailyGoalsLoading ? "Loading today's goals" : dailyGoalsError ? 'Unable to load today' : `${dailyGoalProgress.pending} pending · ${dailyGoalProgress.percentage}% complete`,
+      icon: Target,
+      tone: 'blue' as const,
+    },
+    ...stats,
+  ]
+  const upcomingRangeEnd = useMemo(() => { const date = parseLocalDate(todayKey); date.setDate(date.getDate() + 7); return formatLocalDate(date) }, [todayKey])
+  const logByOccurrence = useMemo(() => new Map(plannerLogs.map((log) => [`${log.session_id}:${log.occurrence_date}`, log])), [plannerLogs])
+  const todayOccurrences = useMemo(() => calculateSessionOccurrences(plannerSessions, todayKey, todayKey).map((item) => ({ ...item, log: logByOccurrence.get(`${item.session.id}:${item.occurrence_date}`) })), [logByOccurrence, plannerSessions, todayKey])
+  const upcomingOccurrences = useMemo(() => calculateSessionOccurrences(plannerSessions, todayKey, upcomingRangeEnd)
+    .filter((item) => item.occurrence_date > todayKey || (item.occurrence_date === todayKey && clockMinutes(item.start_time) > now.getHours() * 60 + now.getMinutes()))
+    .slice(0, 4).map((item) => ({ ...item, log: logByOccurrence.get(`${item.session.id}:${item.occurrence_date}`) })), [logByOccurrence, now, plannerSessions, todayKey, upcomingRangeEnd])
+  const todayProgress = useMemo(() => {
+    const completed = todayOccurrences.filter((item) => item.log?.status === 'completed').length
+    const skipped = todayOccurrences.filter((item) => item.log?.status === 'skipped').length
+    const pending = todayOccurrences.length - completed - skipped
+    return { total: todayOccurrences.length, completed, pending, skipped, percentage: todayOccurrences.length ? Math.round(completed / todayOccurrences.length * 100) : 0 }
+  }, [todayOccurrences])
   const formatDue = (value: string | null) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'No deadline'
   useEffect(() => { void listSyllabusAnalytics().then((data) => {
     const progress = calculateSyllabusProgress(data.modules, data.topics, data.subjects)
@@ -103,7 +199,7 @@ export default function DashboardPage() {
         <div className="absolute right-4 top-4"><SampleBadge /></div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <StatCard key={stat.label} {...stat} />)}</div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{dashboardStats.map((stat) => <StatCard key={stat.label} {...stat} />)}</div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {([
           ['Total assignments', assignmentStats.total, ClipboardList, 'blue'], ['To Do', assignmentStats.todo, CalendarClock, 'amber'], ['In Progress', assignmentStats.inProgress, Clock3, 'violet'], ['Submitted', assignmentStats.submitted, Check, 'blue'], ['Completed', assignmentStats.done, Check, 'green'], ['Overdue', assignmentStats.overdue, CalendarClock, 'amber'],
@@ -115,16 +211,18 @@ export default function DashboardPage() {
       </SectionCard>
 
       <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-2">
-        <SectionCard title="Today's timetable" className="h-full min-w-0" action={<><SampleBadge /><button className="icon-button ml-1" aria-label="More timetable options"><MoreHorizontal size={18} /></button></>}>
-          <div className="space-y-1">{schedule.map((item) => <div key={item.title} className="schedule-row"><span className="w-[68px] shrink-0 text-[10px] tabular-nums text-slate-500 sm:w-[76px] sm:text-[11px]">{item.time}</span><span className={`schedule-dot dot-${item.color}`} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-200">{item.title}</p><p className="mt-1 truncate text-[10px] text-slate-500 sm:text-xs">{item.detail}</p></div><ArrowRight size={15} className="text-slate-600" /></div>)}</div>
-          <button className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.11] py-2.5 text-xs font-medium text-slate-400 transition hover:border-blue-400/30 hover:text-blue-300"><Plus size={14} /> Add a class</button>
+        <SectionCard title="Today's schedule" className="h-full min-w-0" action={<a href="/timetable" className="text-xs text-blue-300 hover:text-blue-200">Timetable <ArrowRight size={13} className="inline" /></a>}>
+          {plannerLoading ? <p role="status" className="text-sm text-slate-500">Loading today's sessions…</p> : plannerError ? <div><p role="alert" className="text-sm text-rose-300">{plannerError}</p><button type="button" onClick={() => setPlannerRetry((value) => value + 1)} className="mt-2 inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white"><RefreshCw size={12} />Retry</button></div> : todayOccurrences.length ? <div className="space-y-1">{todayOccurrences.map((item) => {
+            const category = sessionCategoryStyles[item.session.session_category]
+            const subject = 'subject' in item.session ? item.session.subject : null
+            const status = item.log?.status === 'completed' ? 'Completed' : item.log?.status === 'skipped' ? 'Skipped' : 'Pending'
+            const statusTone = status === 'Completed' ? 'text-emerald-300' : status === 'Skipped' ? 'text-slate-400' : 'text-amber-200'
+            return <div key={`${item.session.id}:${item.occurrence_date}`} className="schedule-row"><span className="w-[100px] shrink-0 text-[10px] tabular-nums text-slate-500 sm:text-[11px]">{formatSessionTime(item.start_time)}–{formatSessionTime(item.end_time)}</span><span className={`schedule-dot ${categoryDot(item.session.session_category)}`} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-200">{item.session.title}</p><p className="mt-1 truncate text-[10px] text-slate-500 sm:text-xs">{subject ? `${subject.name} · ` : ''}{category.label}</p></div><span className={`shrink-0 text-[10px] ${statusTone}`}>{status}</span></div>
+          })}</div> : <p className="text-sm text-slate-500">No sessions scheduled for today.</p>}
+          {!plannerLoading && !plannerError && <div className="mt-4 border-t border-white/[0.06] pt-3"><div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-semibold text-slate-300">Study progress</h3><span className="text-xs font-semibold text-blue-200">{todayProgress.percentage}% complete</span></div><div className="grid grid-cols-4 gap-2 text-center"><div className="rounded-lg bg-white/[0.025] px-2 py-2"><p className="text-lg font-semibold tabular-nums text-slate-100">{todayProgress.total}</p><p className="text-[9px] text-slate-500">Scheduled</p></div><div className="rounded-lg bg-emerald-400/[0.04] px-2 py-2"><p className="text-lg font-semibold tabular-nums text-emerald-200">{todayProgress.completed}</p><p className="text-[9px] text-slate-500">Completed</p></div><div className="rounded-lg bg-amber-400/[0.04] px-2 py-2"><p className="text-lg font-semibold tabular-nums text-amber-200">{todayProgress.pending}</p><p className="text-[9px] text-slate-500">Pending</p></div><div className="rounded-lg bg-white/[0.025] px-2 py-2"><p className="text-lg font-semibold tabular-nums text-slate-300">{todayProgress.skipped}</p><p className="text-[9px] text-slate-500">Skipped</p></div></div></div>}
         </SectionCard>
 
-        <SectionCard title="Daily goals" className="h-full min-w-0" action={<><SampleBadge /><button className="icon-button ml-1" aria-label="More goal options"><MoreHorizontal size={18} /></button></>}>
-          <div className="mb-4 flex items-center gap-3 rounded-lg bg-white/[0.025] p-3"><div className="relative h-10 w-10 shrink-0"><svg className="h-full w-full -rotate-90" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="3"/><circle cx="20" cy="20" r="16" fill="none" stroke="#5d9cff" strokeWidth="3" strokeDasharray="25.1 100.5" strokeLinecap="round"/></svg><span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">25%</span></div><div><p className="text-xs font-medium text-slate-200">You're off to a start</p><p className="mt-1 text-[11px] text-slate-500">1 of 4 goals completed</p></div></div>
-          <div className="space-y-1">{goals.map((goal) => <div key={goal.label} className="goal-row"><span className={`goal-check ${goal.done ? 'goal-check-done' : ''}`}>{goal.done && <Check size={12} />}</span><span className={`flex-1 text-xs ${goal.done ? 'text-slate-500 line-through' : 'text-slate-300'}`}>{goal.label}</span></div>)}</div>
-          <a href="/daily-goals" className="mt-4 flex items-center justify-between border-t border-white/[0.06] pt-3 text-xs font-medium text-slate-400 hover:text-blue-300"><span>See all goals</span><ArrowRight size={14} /></a>
-        </SectionCard>
+        <DailyGoalsDashboardSection goals={dailyGoals} loading={dailyGoalsLoading} error={dailyGoalsError} onRetry={() => setDailyGoalsRetry((value) => value + 1)} />
       </div>
 
       <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-2">
@@ -135,6 +233,15 @@ export default function DashboardPage() {
         </SectionCard>
 
         <div className="grid min-w-0 content-start gap-4">
+        <SectionCard title="Upcoming sessions" className="min-w-0" action={<a href="/timetable" className="text-xs text-blue-300 hover:text-blue-200">Timetable <ArrowRight size={13} className="inline" /></a>}>
+          {plannerLoading ? <p role="status" className="text-sm text-slate-500">Loading sessions…</p> : plannerError ? <div><p role="alert" className="text-sm text-rose-300">{plannerError}</p><button type="button" onClick={() => setPlannerRetry((value) => value + 1)} className="mt-2 inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white"><RefreshCw size={12} />Retry</button></div> : upcomingOccurrences.length ? <div className="space-y-1">{upcomingOccurrences.map((item) => {
+            const category = sessionCategoryStyles[item.session.session_category]
+            const subject = 'subject' in item.session ? item.session.subject : null
+            const status = item.log?.status === 'completed' ? 'Completed' : item.log?.status === 'skipped' ? 'Skipped' : 'Pending'
+            const statusTone = status === 'Completed' ? 'text-emerald-300' : status === 'Skipped' ? 'text-slate-400' : 'text-amber-200'
+            return <div key={`${item.session.id}:${item.occurrence_date}`} className="deadline-row"><div className="deadline-date"><CalendarClock size={14} /></div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{item.session.title}</p><p className="mt-1 truncate text-[11px] text-slate-500">{formatSessionDate(item.occurrence_date)} · {formatSessionTime(item.start_time)}–{formatSessionTime(item.end_time)}{subject ? ` · ${subject.name}` : ` · ${category.label}`}</p></div><span className={`shrink-0 text-[10px] ${statusTone}`}>{status}</span></div>
+          })}</div> : <p className="text-sm text-slate-500">No upcoming sessions in the next week.</p>}
+        </SectionCard>
         <SectionCard title="Upcoming assignments" className="min-w-0" action={<a href="/assignments" className="text-xs text-blue-300 hover:text-blue-200">View All <ArrowRight size={13} className="inline"/></a>}>
           {assignmentLoading ? <p role="status" className="text-sm text-slate-500">Loading assignments…</p> : assignmentError ? <p role="alert" className="text-sm text-rose-300">{assignmentError}</p> : deadlineAssignments.upcoming.length ? <div className="space-y-1">{deadlineAssignments.upcoming.map((item) => <div key={item.id} className="deadline-row"><div className="deadline-date"><CalendarClock size={14}/></div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{item.title}</p><p className="mt-1 truncate text-[11px] text-slate-500">{item.subject.name} · {formatAssignmentStatus(item.status)}</p></div><time className="text-[10px] text-slate-400">{formatDue(item.due_at)}</time></div>)}</div> : <p className="text-sm text-slate-500">No upcoming assignments.</p>}
         </SectionCard>
@@ -144,7 +251,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.055] bg-white/[0.015] px-4 py-3"><div className="flex items-center gap-2 text-[11px] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> Dashboard layout preview · assignment data is synced.</div><span className="items-center gap-1 text-[11px] text-slate-600 sm:flex"><ArrowDownRight size={12}/> Sample study and goal figures</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.055] bg-white/[0.015] px-4 py-3"><div className="flex items-center gap-2 text-[11px] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> Dashboard layout preview · assignment and Daily Goals data are synced.</div><span className="items-center gap-1 text-[11px] text-slate-600 sm:flex"><ArrowDownRight size={12}/> Sample academic and study figures</span></div>
     </div>
   )
 }

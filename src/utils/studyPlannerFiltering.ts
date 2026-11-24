@@ -1,0 +1,7 @@
+import type { StudySession, StudySessionOccurrence } from '../types/studyPlanner'
+import { validateOccurrenceDate } from './studyPlannerValidation'
+import { sortOccurrences } from './studyPlannerDates'
+
+export function filterStudySessions<T extends StudySession>(sessions:T[], criteria:{search?:string;subjectId?:string;category?:string;scheduleType?:string}):T[]{const q=criteria.search?.trim().toLocaleLowerCase()??'';return sessions.filter(s=>(!q||s.title.toLocaleLowerCase().includes(q))&&(!criteria.subjectId||s.subject_id===criteria.subjectId)&&(!criteria.category||s.session_category===criteria.category)&&(!criteria.scheduleType||s.schedule_type===criteria.scheduleType))}
+export function detectSessionOverlaps(items:StudySessionOccurrence[]):Array<[StudySessionOccurrence,StudySessionOccurrence]>{const sorted=sortOccurrences(items);const overlaps:Array<[StudySessionOccurrence,StudySessionOccurrence]>=[];for(let i=0;i<sorted.length;i++)for(let j=i+1;j<sorted.length&&sorted[j].occurrence_date===sorted[i].occurrence_date;j++)if(sorted[j].start_time<sorted[i].end_time)overlaps.push([sorted[i],sorted[j]]);return overlaps}
+export function assertUniqueOccurrenceLog(logs:Array<{session_id:string;occurrence_date:string}>,session:Pick<StudySession,'id'|'schedule_type'|'day_of_week'|'session_date'>,date:string):void{validateOccurrenceDate(session,date);if(logs.some(x=>x.session_id===session.id&&x.occurrence_date===date))throw new Error('A log already exists for this session occurrence.')}
