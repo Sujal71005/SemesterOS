@@ -8,6 +8,7 @@ import SyllabusPage from './pages/SyllabusPage'
 import AssignmentsPage from './pages/AssignmentsPage'
 import TimetablePage from './pages/TimetablePage'
 import DailyGoalsPage from './pages/DailyGoalsPage'
+import AnalyticsPage from './pages/AnalyticsPage'
 import { navigationItems } from './utils/navigation'
 import { PublicOnly, RequireAuth } from './auth/RouteGuards'
 import { ForgotPasswordPage, ResetPasswordPage, SignInPage, SignUpPage } from './pages/AuthPages'
@@ -30,7 +31,8 @@ export default function App() {
           <Route path="assignments" element={<AssignmentsPage />} />
           <Route path="timetable" element={<TimetablePage />} />
           <Route path="daily-goals" element={<DailyGoalsPage />} />
-          {navigationItems.filter((item) => item.path !== '/' && item.path !== '/academics' && item.path !== '/assignments' && item.path !== '/timetable' && item.path !== '/daily-goals').map((item) => (
+          <Route path="analytics" element={<AnalyticsPage />} />
+          {navigationItems.filter((item) => item.path !== '/' && item.path !== '/academics' && item.path !== '/assignments' && item.path !== '/timetable' && item.path !== '/daily-goals' && item.path !== '/analytics').map((item) => (
             <Route key={item.path} path={item.path.slice(1)} element={<PlaceholderPage title={item.label} />} />
           ))}
         </Route>

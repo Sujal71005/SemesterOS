@@ -8,6 +8,7 @@ import type {
   UpdateStudySessionInput,
 } from '../types/studyPlanner'
 import { validateOccurrenceDate, validateSessionFields, validateSessionLog } from '../utils/studyPlannerValidation'
+import { getStudySessionLogDateBounds } from '../utils/studySessionLogRange'
 
 const sessionFields = 'id,user_id,subject_id,title,description,session_category,schedule_type,day_of_week,session_date,start_time,end_time,created_at,updated_at'
 const sessionWithSubjectFields = `${sessionFields},subject:subjects(id,name,kind)`
@@ -122,6 +123,15 @@ export async function listSessionLogs(sessionId?: string): Promise<StudySessionL
   let query = client().from('study_session_logs').select(sessionLogFields)
   if (sessionId) query = query.eq('session_id', sessionId)
   const { data, error } = await query.order('occurrence_date')
+  if (error) throwDatabaseError('load session logs', error)
+  return (data ?? []) as StudySessionLog[]
+}
+
+/** Loads only occurrence logs within an inclusive local calendar-date range. */
+export async function listSessionLogsByDateRange(startDate: string, endDate: string): Promise<StudySessionLog[]> {
+  const bounds = getStudySessionLogDateBounds(startDate, endDate)
+  const { data, error } = await client().from('study_session_logs').select(sessionLogFields)
+    .gte('occurrence_date', bounds.startDate).lte('occurrence_date', bounds.endDate).order('occurrence_date')
   if (error) throwDatabaseError('load session logs', error)
   return (data ?? []) as StudySessionLog[]
 }
